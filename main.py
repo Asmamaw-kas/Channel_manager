@@ -1,7 +1,5 @@
 
-from telegram.ext import Application 
-application = Application.builder().token(TOKEN).build() 
-application.run_polling()
+
 import logging
 import threading
 import time
