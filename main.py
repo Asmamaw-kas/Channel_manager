@@ -1,11 +1,11 @@
-import logging
-import os
-import threading
-import time
-import requests
+
 from telegram.ext import Application 
 application = Application.builder().token(TOKEN).build() 
 application.run_polling()
+import logging
+import threading
+import time
+import requests
 import uvicorn
 from fastapi import FastAPI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,6 +18,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.constants import ParseMode
+from config import Config
 
 # ─────────────────────────────
 #  LOGGING
@@ -45,31 +46,23 @@ def ping():
 def stats():
     return {
         "status": "ok",
-        "channels_count": len(CHANNELS),
-        "channels": CHANNELS,
-        "owner_id": OWNER_ID,
+        "channels_count": len(Config.channels),
+        "channels": Config.channels,
+        "owner_id": Config.OWNER_ID,
         "uptime": time.time() - START_TIME
     }
 
 # ─────────────────────────────
-#  ENVIRONMENT VARIABLES
-# ─────────────────────────────
-TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", 0))
-RENDER_URL = os.getenv("RENDER_URL", "https://your-bot-name.onrender.com")
-START_TIME = time.time()
-
-# ─────────────────────────────
 #  GLOBAL VARIABLES
 # ─────────────────────────────
-CHANNELS = []  # Store channels: [{"id": -100xxx, "title": "Channel Name", "username": "@channel"}]
+START_TIME = time.time()
 
 # ─────────────────────────────
 #  TELEGRAM COMMAND HANDLERS
 # ─────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
@@ -106,7 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command handler"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
@@ -143,7 +136,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def addchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a channel to the bot"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
@@ -180,7 +173,7 @@ async def addchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Check if already exists
-        for channel in CHANNELS:
+        for channel in Config.channels:
             if channel['id'] == chat.id:
                 await update.message.reply_text(
                     f"⚠️ *Channel already registered:*\n`{chat.title}`",
@@ -189,7 +182,7 @@ async def addchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         
         # Add channel
-        CHANNELS.append({
+        Config.channels.append({
             'id': chat.id,
             'username': chat.username,
             'title': chat.title,
@@ -202,7 +195,7 @@ async def addchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📛 *Title:* {chat.title}\n"
             f"🆔 *ID:* `{chat.id}`\n"
             f"👤 *Username:* @{chat.username or 'N/A'}\n"
-            f"📊 *Total Channels:* {len(CHANNELS)}",
+            f"📊 *Total Channels:* {len(Config.channels)}",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -219,30 +212,30 @@ async def addchannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def listchannels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all registered channels"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
-    if not CHANNELS:
+    if not Config.channels:
         await update.message.reply_text("📭 *No channels registered yet.*", parse_mode=ParseMode.MARKDOWN)
         return
     
     message = "📋 *Registered Channels:*\n\n"
-    for i, channel in enumerate(CHANNELS, 1):
+    for i, channel in enumerate(Config.channels, 1):
         message += f"{i}. *{channel['title']}*\n"
         message += f"   • ID: `{channel['id']}`\n"
         message += f"   • Username: @{channel['username'] or 'N/A'}\n\n"
     
-    message += f"📊 *Total:* {len(CHANNELS)} channels"
+    message += f"📊 *Total:* {len(Config.channels)} channels"
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def removechannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a channel"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
-    if not CHANNELS:
+    if not Config.channels:
         await update.message.reply_text("📭 *No channels to remove.*", parse_mode=ParseMode.MARKDOWN)
         return
     
@@ -251,7 +244,7 @@ async def removechannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         # Create inline keyboard with channels
         keyboard = []
-        for channel in CHANNELS:
+        for channel in Config.channels:
             button_text = f"❌ {channel['title'][:30]}"
             callback_data = f"remove_{channel['id']}"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
@@ -266,12 +259,12 @@ async def removechannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         channel_id = int(args[0])
-        for i, channel in enumerate(CHANNELS):
+        for i, channel in enumerate(Config.channels):
             if channel['id'] == channel_id:
-                removed = CHANNELS.pop(i)
+                removed = Config.channels.pop(i)
                 await update.message.reply_text(
                     f"✅ *Channel Removed:*\n`{removed['title']}`\n"
-                    f"📊 *Remaining:* {len(CHANNELS)} channels",
+                    f"📊 *Remaining:* {len(Config.channels)} channels",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
@@ -283,11 +276,11 @@ async def removechannel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clearchannels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all channels"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
-    if not CHANNELS:
+    if not Config.channels:
         await update.message.reply_text("📭 *No channels to clear.*", parse_mode=ParseMode.MARKDOWN)
         return
     
@@ -302,7 +295,7 @@ async def clearchannels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"⚠️ *Confirm Clear All Channels*\n\n"
-        f"This will remove *{len(CHANNELS)}* channels.\n"
+        f"This will remove *{len(Config.channels)}* channels.\n"
         f"*This action cannot be undone!*",
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
@@ -310,7 +303,7 @@ async def clearchannels_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show statistics"""
-    if update.effective_user.id != OWNER_ID:
+    if update.effective_user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ Unauthorized. Only owner can use this bot.")
         return
     
@@ -322,11 +315,11 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🤖 *Bot Info:*
 • Username: @{context.bot.username}
-• Owner ID: `{OWNER_ID}`
+• Owner ID: `{Config.OWNER_ID}`
 • Uptime: {uptime_str}
 
 📢 *Channels:*
-• Total: {len(CHANNELS)} channels
+• Total: {len(Config.channels)} channels
 
 🔄 *System:*
 • Status: Running
@@ -334,27 +327,27 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Storage: Memory
 • Restart: Channels reset on restart
 
-🔗 *Render URL:*
-{RENDER_URL}
+🔗 *Webhook URL:*
+{Config.WEBHOOK_URL or 'Not configured'}
     """
     
     await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
 
 async def forward_to_channels(message, context: ContextTypes.DEFAULT_TYPE):
     """Forward message to all channels"""
-    if not CHANNELS:
+    if not Config.channels:
         if message.chat.type != 'private':
             await message.reply_text("📭 *No channels registered. Use /addchannel first.*", parse_mode=ParseMode.MARKDOWN)
         return
     
-    total = len(CHANNELS)
+    total = len(Config.channels)
     successful = 0
     failed = 0
     
     # Send processing message
     status_msg = await message.reply_text(f"📤 *Broadcasting to {total} channels...*", parse_mode=ParseMode.MARKDOWN)
     
-    for channel in CHANNELS:
+    for channel in Config.channels:
         try:
             # Forward based on message type
             if message.photo:
@@ -440,7 +433,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     # Check if owner
-    if user.id != OWNER_ID:
+    if user.id != Config.OWNER_ID:
         await update.message.reply_text("⚠️ *Unauthorized.* Only the owner can use this bot.", parse_mode=ParseMode.MARKDOWN)
         return
     
@@ -471,25 +464,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif data == "list_channels":
-        if not CHANNELS:
+        if not Config.channels:
             await query.edit_message_text("📭 *No channels registered yet.*", parse_mode=ParseMode.MARKDOWN)
             return
         
         message = "📋 *Registered Channels:*\n\n"
-        for i, channel in enumerate(CHANNELS, 1):
+        for i, channel in enumerate(Config.channels, 1):
             message += f"{i}. *{channel['title']}*\n"
             message += f"   • ID: `{channel['id']}`\n\n"
         
-        message += f"📊 *Total:* {len(CHANNELS)} channels"
+        message += f"📊 *Total:* {len(Config.channels)} channels"
         await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN)
     
     elif data == "remove_channel":
-        if not CHANNELS:
+        if not Config.channels:
             await query.edit_message_text("📭 *No channels to remove.*", parse_mode=ParseMode.MARKDOWN)
             return
         
         keyboard = []
-        for channel in CHANNELS:
+        for channel in Config.channels:
             button_text = f"❌ {channel['title'][:30]}"
             callback_data = f"remove_{channel['id']}"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
@@ -502,7 +495,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif data == "clear_all":
-        if not CHANNELS:
+        if not Config.channels:
             await query.edit_message_text("📭 *No channels to clear.*", parse_mode=ParseMode.MARKDOWN)
             return
         
@@ -516,7 +509,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"⚠️ *Confirm Clear All Channels*\n\n"
-            f"This will remove *{len(CHANNELS)}* channels.\n"
+            f"This will remove *{len(Config.channels)}* channels.\n"
             f"*This action cannot be undone!*",
             reply_markup=reply_markup,
             parse_mode=ParseMode.MARKDOWN
@@ -531,11 +524,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🤖 *Bot Info:*
 • Username: @{context.bot.username}
-• Owner ID: `{OWNER_ID}`
+• Owner ID: `{Config.OWNER_ID}`
 • Uptime: {uptime_str}
 
 📢 *Channels:*
-• Total: {len(CHANNELS)} channels
+• Total: {len(Config.channels)} channels
 
 🔄 *System:*
 • Status: Active
@@ -548,12 +541,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("remove_"):
         channel_id = int(data.replace("remove_", ""))
         
-        for i, channel in enumerate(CHANNELS):
+        for i, channel in enumerate(Config.channels):
             if channel['id'] == channel_id:
-                removed = CHANNELS.pop(i)
+                removed = Config.channels.pop(i)
                 await query.edit_message_text(
                     f"✅ *Channel Removed:*\n`{removed['title']}`\n"
-                    f"📊 *Remaining:* {len(CHANNELS)} channels",
+                    f"📊 *Remaining:* {len(Config.channels)} channels",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
@@ -561,8 +554,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ *Channel not found.*", parse_mode=ParseMode.MARKDOWN)
     
     elif data == "clear_yes":
-        channel_count = len(CHANNELS)
-        CHANNELS.clear()
+        channel_count = len(Config.channels)
+        Config.channels.clear()
         await query.edit_message_text(
             f"✅ *All {channel_count} channels cleared.*\n"
             f"Use /addchannel to add new channels.",
@@ -572,7 +565,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "clear_no":
         await query.edit_message_text(
             "✅ *Operation cancelled.*\n"
-            f"Channels preserved: {len(CHANNELS)}",
+            f"Channels preserved: {len(Config.channels)}",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -581,11 +574,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────
 def keep_alive():
     """Ping Render service to prevent sleep"""
+    if not Config.WEBHOOK_URL:
+        logger.info("⚠️ Keep-alive disabled: WEBHOOK_URL not configured")
+        return
+    
     urls_to_ping = [
-        RENDER_URL,
-        f"{RENDER_URL}/",
-        f"{RENDER_URL}/ping",
-        f"{RENDER_URL}/stats"
+        Config.WEBHOOK_URL,
+        f"{Config.WEBHOOK_URL}/",
+        f"{Config.WEBHOOK_URL}/ping",
+        f"{Config.WEBHOOK_URL}/stats"
     ]
     
     logger.info("🔔 Starting keep-alive system...")
@@ -620,7 +617,7 @@ def bot_health_monitor(application):
             logger.info(f"🤖 Bot healthy: @{bot_info.username}")
             
             # Log channel count
-            logger.info(f"📊 Channels: {len(CHANNELS)}")
+            logger.info(f"📊 Channels: {len(Config.channels)}")
             
         except Exception as e:
             logger.error(f"❌ Health check failed: {e}")
@@ -632,9 +629,9 @@ def bot_health_monitor(application):
 # ─────────────────────────────
 def run_fastapi():
     """Run FastAPI server"""
-    port = int(os.environ.get("PORT", 8000))
-    logger.info(f"🚀 Starting FastAPI on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    logger.info(f"🚀 Starting FastAPI on port {Config.PORT}")
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=Config.PORT, log_level="info")
 
 # ─────────────────────────────
 #  MAIN ENTRY POINT
@@ -642,18 +639,19 @@ def run_fastapi():
 def main():
     """Main function to start everything"""
     # Validate environment variables
-    if not TOKEN:
+    if not Config.BOT_TOKEN:
         logger.error("❌ Missing BOT_TOKEN environment variable")
         raise ValueError("BOT_TOKEN is required")
     
-    if not OWNER_ID:
+    if not Config.OWNER_ID:
         logger.error("❌ Missing OWNER_ID environment variable")
         raise ValueError("OWNER_ID is required")
     
     logger.info("=" * 50)
     logger.info("🤖 Starting Channel Manager Bot")
-    logger.info(f"👤 Owner ID: {OWNER_ID}")
-    logger.info(f"🌐 Render URL: {RENDER_URL}")
+    logger.info(f"👤 Owner ID: {Config.OWNER_ID}")
+    logger.info(f"🌐 Webhook URL: {Config.WEBHOOK_URL or 'Not configured'}")
+    logger.info(f"🚪 Port: {Config.PORT}")
     logger.info("=" * 50)
     
     # Start FastAPI server in background thread
@@ -661,13 +659,16 @@ def main():
     fastapi_thread.start()
     logger.info("✅ FastAPI server started")
     
-    # Start keep-alive system
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-    keep_alive_thread.start()
-    logger.info("✅ Keep-alive system started")
+    # Start keep-alive system (only if webhook URL is configured)
+    if Config.WEBHOOK_URL:
+        keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+        keep_alive_thread.start()
+        logger.info("✅ Keep-alive system started")
+    else:
+        logger.info("ℹ️ Keep-alive system disabled (no WEBHOOK_URL)")
     
     # Create and configure bot
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(Config.BOT_TOKEN).build()
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
