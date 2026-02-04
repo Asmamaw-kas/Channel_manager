@@ -4,7 +4,8 @@ import threading
 import time
 import requests
 from telegram.ext import Application 
-application = Application.builder().token(TOKEN).build() application.run_polling()
+application = Application.builder().token(TOKEN).build() 
+application.run_polling()
 import uvicorn
 from fastapi import FastAPI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
