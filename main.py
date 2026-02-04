@@ -1,17 +1,17 @@
-import os
 import logging
 import asyncio
-from threading import Thread
-from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from flask import Flask
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater, 
+    Application, 
     CommandHandler, 
     MessageHandler, 
-    Filters, 
-    CallbackQueryHandler,
-    CallbackContext
+    filters, 
+    ContextTypes,
+    CallbackQueryHandler
 )
+from telegram.constants import ParseMode
+from config import Config
 
 # Configure logging
 logging.basicConfig(
@@ -34,16 +34,10 @@ def health():
 # Store channels in memory
 channels = []
 
-# Load configuration from environment variables
-BOT_TOKEN = os.getenv('BOT_TOKEN', '')
-OWNER_ID = int(os.getenv('OWNER_ID', 0))
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
-PORT = int(os.getenv('PORT', 10000))
-
-def start_command(update: Update, context: CallbackContext):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a welcome message when /start is issued."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ You are not authorized to use this bot.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ You are not authorized to use this bot.")
         return
     
     welcome_text = """
@@ -63,12 +57,12 @@ def start_command(update: Update, context: CallbackContext):
 3. Send any media/message to bot to forward to all channels
     """
     
-    update.message.reply_text(
+    await update.message.reply_text(
         welcome_text,
         parse_mode=ParseMode.MARKDOWN
     )
 
-def help_command(update: Update, context: CallbackContext):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send help message."""
     help_text = """
 *📚 Bot Usage Guide*
@@ -95,39 +89,21 @@ def help_command(update: Update, context: CallbackContext):
 *Note:* Channels are stored in memory. They will reset when bot restarts.
     """
     
-    update.message.reply_text(
+    await update.message.reply_text(
         help_text,
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def get_chat_async(bot, chat_id_or_username):
-    """Async wrapper for get_chat."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return await bot.get_chat(chat_id_or_username)
-    finally:
-        loop.close()
-
-async def get_chat_member_async(bot, chat_id, user_id):
-    """Async wrapper for get_chat_member."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return await bot.get_chat_member(chat_id, user_id)
-    finally:
-        loop.close()
-
-def add_channel_command(update: Update, context: CallbackContext):
+async def add_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a new channel to the bot."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ Only the owner can add channels.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ Only the owner can add channels.")
         return
     
     args = context.args
     
     if not args:
-        update.message.reply_text(
+        await update.message.reply_text(
             "Please provide channel username or ID.\n"
             "Usage: `/add_channel @channel_username`\n"
             "Or forward a message from the channel and use /add_channel",
@@ -138,25 +114,18 @@ def add_channel_command(update: Update, context: CallbackContext):
     channel_identifier = args[0]
     
     try:
-        # Run async functions in a thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Get chat info
+        # Try to get channel info
         if channel_identifier.startswith('@'):
-            chat = loop.run_until_complete(context.bot.get_chat(channel_identifier))
+            chat = await context.bot.get_chat(channel_identifier)
         else:
-            chat = loop.run_until_complete(context.bot.get_chat(int(channel_identifier)))
+            # Try as channel ID
+            chat = await context.bot.get_chat(int(channel_identifier))
         
-        # Check if bot is admin
-        chat_member = loop.run_until_complete(
-            context.bot.get_chat_member(chat.id, context.bot.id)
-        )
-        
-        loop.close()
+        # Check if bot is admin in the channel
+        chat_member = await context.bot.get_chat_member(chat.id, context.bot.id)
         
         if chat_member.status not in ['administrator', 'creator']:
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"❌ Bot is not admin in {chat.title}.\n"
                 f"Please add bot as administrator first with all permissions."
             )
@@ -165,7 +134,7 @@ def add_channel_command(update: Update, context: CallbackContext):
         # Check if channel already exists
         for channel in channels:
             if channel['channel_id'] == chat.id:
-                update.message.reply_text(
+                await update.message.reply_text(
                     f"⚠️ Channel '{chat.title}' is already registered."
                 )
                 return
@@ -180,7 +149,7 @@ def add_channel_command(update: Update, context: CallbackContext):
         
         channels.append(channel_data)
         
-        update.message.reply_text(
+        await update.message.reply_text(
             f"✅ Channel *{chat.title}* has been added successfully!\n"
             f"• ID: `{chat.id}`\n"
             f"• Username: @{chat.username or 'N/A'}\n"
@@ -190,7 +159,7 @@ def add_channel_command(update: Update, context: CallbackContext):
         
     except Exception as e:
         logger.error(f"Error adding channel: {e}")
-        update.message.reply_text(
+        await update.message.reply_text(
             f"❌ Error: {str(e)}\n\n"
             "Make sure:\n"
             "1. Bot is added to the channel\n"
@@ -198,14 +167,14 @@ def add_channel_command(update: Update, context: CallbackContext):
             "3. Channel username/ID is correct"
         )
 
-def remove_channel_command(update: Update, context: CallbackContext):
+async def remove_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a channel from the bot."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ Only the owner can remove channels.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ Only the owner can remove channels.")
         return
     
     if not channels:
-        update.message.reply_text("No channels registered.")
+        await update.message.reply_text("No channels registered.")
         return
     
     if not context.args:
@@ -217,7 +186,7 @@ def remove_channel_command(update: Update, context: CallbackContext):
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text(
+        await update.message.reply_text(
             "Select a channel to remove:",
             reply_markup=reply_markup
         )
@@ -229,25 +198,25 @@ def remove_channel_command(update: Update, context: CallbackContext):
         for i, channel in enumerate(channels):
             if channel['channel_id'] == channel_id:
                 removed_channel = channels.pop(i)
-                update.message.reply_text(
+                await update.message.reply_text(
                     f"✅ Channel '{removed_channel['channel_title']}' removed successfully.\n"
                     f"Remaining channels: {len(channels)}"
                 )
                 return
         
-        update.message.reply_text("Channel not found.")
+        await update.message.reply_text("Channel not found.")
     
     except ValueError:
-        update.message.reply_text("Please provide a valid channel ID.")
+        await update.message.reply_text("Please provide a valid channel ID.")
 
-def clear_channels_command(update: Update, context: CallbackContext):
+async def clear_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove ALL channels."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ Only the owner can clear channels.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ Only the owner can clear channels.")
         return
     
     if not channels:
-        update.message.reply_text("No channels to clear.")
+        await update.message.reply_text("No channels to clear.")
         return
     
     # Create confirmation buttons
@@ -259,20 +228,20 @@ def clear_channels_command(update: Update, context: CallbackContext):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_text(
+    await update.message.reply_text(
         f"⚠️ Are you sure you want to remove ALL {len(channels)} channels?\n"
         "This action cannot be undone!",
         reply_markup=reply_markup
     )
 
-def list_channels_command(update: Update, context: CallbackContext):
+async def list_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all registered channels."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ Only the owner can view channels.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ Only the owner can view channels.")
         return
     
     if not channels:
-        update.message.reply_text("No channels registered yet.")
+        await update.message.reply_text("No channels registered yet.")
         return
     
     message = "📊 *Registered Channels:*\n\n"
@@ -282,12 +251,12 @@ def list_channels_command(update: Update, context: CallbackContext):
         message += f"   • Username: @{channel['channel_username'] or 'N/A'}\n\n"
     
     message += f"Total: {len(channels)} channels"
-    update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
-def stats_command(update: Update, context: CallbackContext):
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot statistics."""
-    if update.effective_user.id != OWNER_ID:
-        update.message.reply_text("⚠️ Only the owner can view statistics.")
+    if update.effective_user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ Only the owner can view statistics.")
         return
     
     stats_text = f"""
@@ -298,20 +267,20 @@ def stats_command(update: Update, context: CallbackContext):
 
 *Bot Info:*
 • Username: @{context.bot.username}
-• Owner ID: {OWNER_ID}
+• Owner ID: {Config.OWNER_ID}
 
 *Storage:*
 • Channels stored in memory
 • Will reset on bot restart
     """
     
-    update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
 
-def forward_to_all_channels(message, context: CallbackContext):
+async def forward_to_all_channels(message, context: ContextTypes.DEFAULT_TYPE):
     """Forward a message to all registered channels."""
     if not channels:
         if message.chat.type != 'private':
-            message.reply_text("No channels registered yet. Use /add_channel first.")
+            await message.reply_text("No channels registered yet. Use /add_channel first.")
         return
     
     total_channels = len(channels)
@@ -319,13 +288,13 @@ def forward_to_all_channels(message, context: CallbackContext):
     failed = 0
     
     # Send processing message
-    status_msg = message.reply_text(f"📤 Broadcasting to {total_channels} channels...")
+    status_msg = await message.reply_text(f"📤 Broadcasting to {total_channels} channels...")
     
     for channel in channels:
         try:
             # Forward the message based on type
             if message.photo:
-                context.bot.send_photo(
+                await context.bot.send_photo(
                     chat_id=channel['channel_id'],
                     photo=message.photo[-1].file_id,
                     caption=message.caption,
@@ -333,7 +302,7 @@ def forward_to_all_channels(message, context: CallbackContext):
                     parse_mode=ParseMode.HTML
                 )
             elif message.video:
-                context.bot.send_video(
+                await context.bot.send_video(
                     chat_id=channel['channel_id'],
                     video=message.video.file_id,
                     caption=message.caption,
@@ -341,7 +310,7 @@ def forward_to_all_channels(message, context: CallbackContext):
                     parse_mode=ParseMode.HTML
                 )
             elif message.document:
-                context.bot.send_document(
+                await context.bot.send_document(
                     chat_id=channel['channel_id'],
                     document=message.document.file_id,
                     caption=message.caption,
@@ -349,7 +318,7 @@ def forward_to_all_channels(message, context: CallbackContext):
                     parse_mode=ParseMode.HTML
                 )
             elif message.audio:
-                context.bot.send_audio(
+                await context.bot.send_audio(
                     chat_id=channel['channel_id'],
                     audio=message.audio.file_id,
                     caption=message.caption,
@@ -357,7 +326,7 @@ def forward_to_all_channels(message, context: CallbackContext):
                     parse_mode=ParseMode.HTML
                 )
             elif message.voice:
-                context.bot.send_voice(
+                await context.bot.send_voice(
                     chat_id=channel['channel_id'],
                     voice=message.voice.file_id,
                     caption=message.caption,
@@ -365,12 +334,12 @@ def forward_to_all_channels(message, context: CallbackContext):
                     parse_mode=ParseMode.HTML
                 )
             elif message.sticker:
-                context.bot.send_sticker(
+                await context.bot.send_sticker(
                     chat_id=channel['channel_id'],
                     sticker=message.sticker.file_id
                 )
             elif message.animation:
-                context.bot.send_animation(
+                await context.bot.send_animation(
                     chat_id=channel['channel_id'],
                     animation=message.animation.file_id,
                     caption=message.caption,
@@ -379,7 +348,7 @@ def forward_to_all_channels(message, context: CallbackContext):
                 )
             else:
                 # Text message
-                context.bot.send_message(
+                await context.bot.send_message(
                     chat_id=channel['channel_id'],
                     text=message.text or message.caption or "📢 Broadcast",
                     entities=message.entities or message.caption_entities,
@@ -394,20 +363,20 @@ def forward_to_all_channels(message, context: CallbackContext):
             continue
     
     # Update status message
-    status_msg.edit_text(
+    await status_msg.edit_text(
         f"✅ Broadcast completed!\n\n"
         f"• ✅ Successful: {successful}\n"
         f"• ❌ Failed: {failed}\n"
         f"• 📊 Total: {total_channels}"
     )
 
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming messages and forward to channels."""
     user = update.effective_user
     
     # Only owner can send messages to broadcast
-    if user.id != OWNER_ID:
-        update.message.reply_text("⚠️ You are not authorized to use this bot.")
+    if user.id != Config.OWNER_ID:
+        await update.message.reply_text("⚠️ You are not authorized to use this bot.")
         return
     
     # Check if message is a command
@@ -415,12 +384,12 @@ def handle_message(update: Update, context: CallbackContext):
         return
     
     # Forward to all channels
-    forward_to_all_channels(update.message, context)
+    await forward_to_all_channels(update.message, context)
 
-def button_callback(update: Update, context: CallbackContext):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks."""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     if query.data.startswith('remove_'):
         channel_id = int(query.data.replace('remove_', ''))
@@ -428,88 +397,106 @@ def button_callback(update: Update, context: CallbackContext):
         for i, channel in enumerate(channels):
             if channel['channel_id'] == channel_id:
                 removed_channel = channels.pop(i)
-                query.edit_message_text(
+                await query.edit_message_text(
                     f"✅ Channel '{removed_channel['channel_title']}' removed successfully.\n"
                     f"Remaining channels: {len(channels)}"
                 )
                 return
         
-        query.edit_message_text("Channel not found.")
+        await query.edit_message_text("Channel not found.")
     
     elif query.data == 'clear_yes':
         channel_count = len(channels)
         channels.clear()
-        query.edit_message_text(f"✅ All {channel_count} channels have been cleared.")
+        await query.edit_message_text(f"✅ All {channel_count} channels have been cleared.")
     
     elif query.data == 'clear_no':
-        query.edit_message_text("✅ Channel clearing cancelled.")
+        await query.edit_message_text("✅ Channel clearing cancelled.")
 
-def error_handler(update: Update, context: CallbackContext):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log errors."""
     logger.error(f"Update {update} caused error {context.error}")
 
-def main():
-    """Main function to run the bot."""
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN not set in environment variables!")
-        return
+async def post_init(application: Application):
+    """Post initialization."""
+    await application.bot.set_my_commands([
+        ("start", "Start the bot"),
+        ("add_channel", "Add a new channel"),
+        ("remove_channel", "Remove a channel"),
+        ("clear_channels", "Remove ALL channels"),
+        ("list_channels", "List all channels"),
+        ("stats", "Show statistics"),
+        ("help", "Show help")
+    ])
     
-    if OWNER_ID == 0:
-        logger.error("OWNER_ID not set in environment variables!")
-        return
-    
-    logger.info("Starting Channel Manager Bot...")
-    
-    # Create updater
-    updater = Updater(BOT_TOKEN, use_context=True)
-    
-    # Get dispatcher
-    dp = updater.dispatcher
+    logger.info(f"Bot @{application.bot.username} started successfully!")
+    logger.info(f"Owner ID: {Config.OWNER_ID}")
+
+def setup_bot():
+    """Setup and run the bot."""
+    # Create application
+    application = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()
     
     # Add command handlers
-    dp.add_handler(CommandHandler("start", start_command))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("add_channel", add_channel_command))
-    dp.add_handler(CommandHandler("remove_channel", remove_channel_command))
-    dp.add_handler(CommandHandler("clear_channels", clear_channels_command))
-    dp.add_handler(CommandHandler("list_channels", list_channels_command))
-    dp.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("add_channel", add_channel_command))
+    application.add_handler(CommandHandler("remove_channel", remove_channel_command))
+    application.add_handler(CommandHandler("clear_channels", clear_channels_command))
+    application.add_handler(CommandHandler("list_channels", list_channels_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     
     # Add message handler
-    dp.add_handler(MessageHandler(Filters.all & ~Filters.command, handle_message))
+    application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     
     # Add callback query handler
-    dp.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CallbackQueryHandler(button_callback))
     
     # Add error handler
-    dp.add_error_handler(error_handler)
+    application.add_error_handler(error_handler)
     
-    # Check if webhook or polling
-    if WEBHOOK_URL and WEBHOOK_URL.startswith('http'):
-        # Webhook mode
-        logger.info(f"Starting webhook mode on {WEBHOOK_URL}")
+    return application
+
+def run_flask():
+    """Run Flask app."""
+    logger.info("Starting Flask server...")
+    app.run(host='0.0.0.0', port=Config.PORT, debug=False, use_reloader=False)
+
+def main():
+    """Main function to run both bot and Flask."""
+    logger.info("Starting Channel Manager Bot...")
+    
+    # Get the bot application
+    bot_application = setup_bot()
+    
+    # Check if we should use webhook or polling
+    if Config.WEBHOOK_URL and Config.WEBHOOK_URL.startswith('http'):
+        # Webhook mode for production
+        logger.info(f"Starting in WEBHOOK mode")
+        logger.info(f"Webhook URL: {Config.WEBHOOK_URL}")
         
-        # Start Flask in a separate thread
-        flask_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False))
-        flask_thread.daemon = True
+        # Start Flask first, then set up webhook
+        import threading
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
         
-        # Set webhook
-        updater.start_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=BOT_TOKEN,
-            webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
-        )
+        # Give Flask time to start
+        import time
+        time.sleep(2)
         
-        logger.info("Bot started with webhook. Press Ctrl+C to stop.")
-        updater.idle()
+        # Run bot with webhook
+        bot_application.run_webhook(
+            listen="0.0.0.0",
+            port=Config.PORT,
+            url_path=Config.BOT_TOKEN,
+            webhook_url=f"{Config.WEBHOOK_URL}/{Config.BOT_TOKEN}",
+        )
     else:
-        # Polling mode
-        logger.info("Starting polling mode...")
-        updater.start_polling()
-        logger.info("Bot started with polling. Press Ctrl+C to stop.")
-        updater.idle()
+        # Polling mode for development
+        logger.info("Starting in POLLING mode")
+        
+        # Run bot with polling
+        bot_application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
