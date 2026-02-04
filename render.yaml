@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: channel_manager
+    env: python
+    pythonVersion: 3.11.9
+    startCommand: python main.py
